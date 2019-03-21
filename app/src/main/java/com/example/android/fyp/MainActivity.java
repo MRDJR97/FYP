@@ -1,12 +1,14 @@
 package com.example.android.fyp;
 
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
@@ -34,6 +36,7 @@ public class MainActivity extends AppCompatActivity {
     ImageView uploadImageView;
     Button addBtn;
     Button analyseButton;
+    Button takePicButton;
     TextView outputNumber;
     Uri selectedImage;
     /** An instance of the driver class to run model inference with Tensorflow Lite. */
@@ -41,8 +44,9 @@ public class MainActivity extends AppCompatActivity {
     /** The loaded TensorFlow Lite model. */
     private MappedByteBuffer tfliteModel;
 
+    public static final int REQUEST_CAPTURE = 1;
     private static final int GALLERY_REQUEST_CODE = 100;
-    Boolean imagePicked;
+    Boolean imagePicked = false;
     //String modelPath = "1.tflite";
     String modelPath = "1Data_aug_200x200_30epoch.tflite";//================================================================================
     /** A ByteBuffer to hold image data, to be feed into Tensorflow Lite as inputs. */
@@ -81,13 +85,22 @@ public class MainActivity extends AppCompatActivity {
 
         uploadImageView = (ImageView) findViewById(R.id.uploadImageView);
         addBtn = (Button) findViewById(R.id.addBtn);
+        takePicButton = (Button) findViewById(R.id.takePic);
         analyseButton = (Button) findViewById(R.id.analyseButton);
+        analyseButton.setVisibility(View.INVISIBLE);
         outputNumber = (TextView) findViewById(R.id.outputNumber);
+        outputNumber.setVisibility(View.INVISIBLE);
 
         addBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 pickFromGallery();
+            }
+        });
+        takePicButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                launchCamera(view);
             }
         });
 
@@ -99,6 +112,9 @@ public class MainActivity extends AppCompatActivity {
         //tflite = new Interpreter(tfliteModel, tfliteOptions);
         tflite = new Interpreter(tfliteModel);
 
+        if(!hasCamera()){
+            takePicButton.setEnabled(false);
+        }
 
         analyseButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -118,6 +134,33 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private boolean hasCamera() {
+        return getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY);
+    }
+
+    private void launchCamera(View v){
+        Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        startActivityForResult(intent, REQUEST_CAPTURE);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data){
+        if(requestCode == REQUEST_CAPTURE && resultCode == RESULT_OK){
+            Bundle extras = data.getExtras();
+            Bitmap photo = (Bitmap) extras.get("data");
+            imagePicked = true;
+            uploadImageView.setImageBitmap(photo);
+            outputNumber.setVisibility(View.VISIBLE);
+            analyseButton.setVisibility(View.VISIBLE);
+        } else if(requestCode == GALLERY_REQUEST_CODE && resultCode == RESULT_OK) {
+            selectedImage = data.getData();
+            imagePicked = true;
+            uploadImageView.setImageURI(selectedImage);
+            outputNumber.setVisibility(View.VISIBLE);
+            analyseButton.setVisibility(View.VISIBLE);
+        }
+    }
+
     private void pickFromGallery(){
         //Create an Intent with action as ACTION_PICK
         Intent intent=new Intent(Intent.ACTION_PICK);
@@ -128,17 +171,6 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra(Intent.EXTRA_MIME_TYPES,mimeTypes);
         // Launching the Intent
         startActivityForResult(intent,GALLERY_REQUEST_CODE);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data){
-        super.onActivityResult(requestCode, resultCode, data);
-        if(resultCode == RESULT_OK && requestCode == GALLERY_REQUEST_CODE){
-            selectedImage = data.getData();
-            imagePicked = true;
-            uploadImageView.setImageURI(selectedImage);
-
-        }
     }
 
     /** Memory-map the model file in Assets. */
