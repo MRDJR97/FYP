@@ -1,12 +1,16 @@
 package com.example.android.fyp;
 
+import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.support.v7.app.AppCompatActivity;
@@ -18,8 +22,13 @@ import android.widget.TextView;
 
 import org.tensorflow.lite.Interpreter;
 
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
@@ -37,6 +46,7 @@ public class MainActivity extends AppCompatActivity {
     Button addBtn;
     Button analyseButton;
     Button takePicButton;
+    Button saveButton;
     TextView outputNumber;
     Uri selectedImage;
     /** An instance of the driver class to run model inference with Tensorflow Lite. */
@@ -46,6 +56,7 @@ public class MainActivity extends AppCompatActivity {
 
     public static final int REQUEST_CAPTURE = 1;
     private static final int GALLERY_REQUEST_CODE = 100;
+    Bitmap currImgBitmap;
     Boolean imagePicked = false;
     //String modelPath = "1.tflite";
     String modelPath = "1Data_aug_200x200_30epoch.tflite";//================================================================================
@@ -87,9 +98,11 @@ public class MainActivity extends AppCompatActivity {
         addBtn = (Button) findViewById(R.id.addBtn);
         takePicButton = (Button) findViewById(R.id.takePic);
         analyseButton = (Button) findViewById(R.id.analyseButton);
-        analyseButton.setVisibility(View.INVISIBLE);
+        analyseButton.setVisibility(View.GONE);
         outputNumber = (TextView) findViewById(R.id.outputNumber);
-        outputNumber.setVisibility(View.INVISIBLE);
+        outputNumber.setVisibility(View.GONE);
+        saveButton = (Button) findViewById(R.id.saveButton);
+        saveButton.setVisibility(View.GONE);
 
         addBtn.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -122,13 +135,25 @@ public class MainActivity extends AppCompatActivity {
                 if(imagePicked) {
                     float prediction = classify();
                     if(prediction == 0.0) {//esgfiobrwaibeauiob
-                        outputNumber.setText("Benign");
+                        outputNumber.setText("Result: Benign");
                     } else if(prediction == 1.0){
-                        outputNumber.setText("Malignant");
+                        outputNumber.setText("Result: Malignant");
                     } else {
-                        outputNumber.setText(Float.toString(prediction));
+                        outputNumber.setText("Result: " + Float.toString(prediction));
                     }
-
+                    analyseButton.setVisibility(View.GONE);
+                    outputNumber.setVisibility(View.VISIBLE);
+                    saveButton.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+        saveButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                try {
+                    saveInGallery(currImgBitmap);
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
             }
         });
@@ -145,20 +170,28 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data){
-        if(requestCode == REQUEST_CAPTURE && resultCode == RESULT_OK){
-            Bundle extras = data.getExtras();
-            Bitmap photo = (Bitmap) extras.get("data");
-            imagePicked = true;
-            uploadImageView.setImageBitmap(photo);
-            outputNumber.setVisibility(View.VISIBLE);
-            analyseButton.setVisibility(View.VISIBLE);
-        } else if(requestCode == GALLERY_REQUEST_CODE && resultCode == RESULT_OK) {
-            selectedImage = data.getData();
-            imagePicked = true;
-            uploadImageView.setImageURI(selectedImage);
+        if(resultCode == RESULT_OK) {
+            if (requestCode == REQUEST_CAPTURE) {
+                Bundle extras = data.getExtras();
+                currImgBitmap= (Bitmap) extras.get("data");
+                imagePicked = true;
+                uploadImageView.setImageBitmap(Bitmap.createScaledBitmap(currImgBitmap, 200, 200, false));
+            } else if (requestCode == GALLERY_REQUEST_CODE) {
+                selectedImage = data.getData();
+                InputStream imageStream = null;
+                try {
+                    imageStream = getContentResolver().openInputStream(selectedImage);
+                } catch (FileNotFoundException e) {
+                    e.printStackTrace();
+                }
+                currImgBitmap = BitmapFactory.decodeStream(imageStream);
+                uploadImageView.setImageBitmap(Bitmap.createScaledBitmap(currImgBitmap, 200, 200, false));
+                imagePicked = true;
+            }
             outputNumber.setVisibility(View.VISIBLE);
             analyseButton.setVisibility(View.VISIBLE);
         }
+
     }
 
     private void pickFromGallery(){
@@ -191,7 +224,6 @@ public class MainActivity extends AppCompatActivity {
         Bitmap b = Bitmap.createScaledBitmap(bOrig, modelImgWidth, modelImgHeight, true);
         int w = b.getWidth();
         int h = b.getHeight();
-        Log.i("bitmap", "H:" + h + " W: " + w);
 
         if (tflite == null) {
             Log.e("error", "Image classifier has not been initialized; Skipped.");
@@ -324,12 +356,66 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Closes tflite to release resources. */
-    public void close() {
-        tflite.close();
-        tflite = null;
-        tfliteModel = null;
+    private void saveInGallery(Bitmap bitmap) throws IOException {
+
+        ContextWrapper cw = new ContextWrapper(getApplicationContext());
+        int counter = 0;
+        File imgToBeSaved;
+        String NAME = "test";
+        String NOMEDIA=".nomedia";
+        File imgDirectory = cw.getDir("imageDir", Context.MODE_PRIVATE);
+        imgToBeSaved = new File(imgDirectory, NAME+NOMEDIA);
+
+        while(imgToBeSaved.exists()){
+            //iterate counter until we have a new filename
+            counter++;
+            imgToBeSaved = new File(imgDirectory, NAME+counter+NOMEDIA);
+        }
+
+        Log.i("storage", "RUNNING");
+        FileOutputStream fos = null;
+        try {
+            fos = new FileOutputStream(imgToBeSaved);
+            Log.i("storage", "ABSOLUTE PATH:" + imgToBeSaved.getAbsolutePath());
+            // Use the compress method on the BitMap object to write image to the OutputStream
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                fos.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+
+
+
     }
 
+    /*private String saveToInternalStorage(Bitmap bitmapImage){
+        ContextWrapper cw = new ContextWrapper(getApplicationContext());
+        // path to /data/data/yourapp/app_data/imageDir
+        File directory = cw.getDir("imageDir", Context.MODE_PRIVATE);
+        // Create imageDir
+        File mypath=new File(directory,"profile.jpg");
 
+        FileOutputStream fos = null;
+        try {
+            fos = new FileOutputStream(mypath);
+            // Use the compress method on the BitMap object to write image to the OutputStream
+            bitmapImage.compress(Bitmap.CompressFormat.PNG, 100, fos);
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                fos.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        return directory.getAbsolutePath();
+    }
+*/
 }
